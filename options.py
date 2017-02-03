@@ -1,16 +1,20 @@
 import os.path
 
-import log, audio, players, server
+import log, audio, players, server, client, game
 
 
 filename = "options.txt"
 references = [
-    "server:ip",
+    "client.description:identity",
+    "client.description:server_ip",
     "audio.music:volume",
     "audio.sound:volume"
 ] + [
     "players:keybinding@{},{}".format(idx, key)
-    for idx in range(4) for key in players.get_keys()
+    for idx in players.get_idxs() for key in players.get_keys()
+] + [
+    "players:name@{}".format(idx)
+    for idx in players.get_idxs()
 ]
 
 

@@ -1,4 +1,4 @@
-import socket
+import socket, string
 
 import pyglet
 from pyglet.window import key
@@ -8,49 +8,59 @@ from cocos.scene import Scene
 from cocos.menu import *
 from cocos.actions import *
 
-import log, audio, options, players, server, client
+import log, audio, options, players, server, client, game
 
 
-class KaboomMultiplexLayer(MultiplexLayer):
+class MenuMultiplexLayer(Layer):
 
     def __init__(self):
 
-        self.map = [
-            'main',
-            'play',
-            'local',
-            'network',
-            'join',
-            'options',
-            'players',
-            'keybindings@0',
-            'keybindings@1',
-            'keybindings@2',
-            'keybindings@3'
-        ]
-        self.layer_stack = []
+        self.layers = {
+            'main':     MainMenu(),
+            'play':     PlayMenu(),
+            'local':    LocalMenu(),
+            'network':  NetworkMenu(),
+            'join':     JoinMenu(),
+            'host':     HostMenu(),
+            'options':  OptionsMenu(),
+            'players':  PlayersMenu(),
+        }
 
-        super().__init__(
-            MainMenu(),
-            PlayMenu(),
-            LocalMenu(),
-            NetworkMenu(),
-            JoinMenu(),
-            OptionsMenu(),
-            PlayersMenu(),
-            *[KeybindingsMenu(idx) for idx in range(4)]
-        )
+        super().__init__()
+        self.add(self.layers["main"], name = "main")
+        self.stack = ["main"]
 
-    def step_in(self, next_layer):
-        self.layer_stack.append(self.enabled_layer)
-        super().switch_to(self.map.index(next_layer))
+
+    def step_in(self, name):
+
+        if name not in self.layers.keys():
+            raise Exception("MenuMultiplexLayer: Layer name not found")
+
+        self.remove(self.stack[-1])
+        self.stack.append(name)
+        self.add(self.layers[name], name = name)
 
     def step_out(self):
-        last_layer = self.layer_stack.pop()
-        super().switch_to(last_layer)
+        self.remove(self.stack.pop())
+        name = self.stack[-1]
+        self.add(self.layers[name], name = name)
+
+    def add_layer(self, layer, name):
+
+        if name in self.layers.keys():
+            raise Exception("MenuMultiplexLayer: Layer name already exists")
+
+        self.layers[name] = layer
+
+    def remove_layer(self, name):
+
+        if name not in self.layers.keys():
+            raise Exception("MenuMultiplexLayer: Layer name not found")
+
+        del self.layers[name]
 
 
-class KaboomMenu(Menu):
+class GameMenu(Menu):
 
     def __init__(self):
         super().__init__("KabOOm!")
@@ -100,7 +110,7 @@ class KaboomMenu(Menu):
         super().create_menu(items, **kwargs)
 
 
-class MainMenu(KaboomMenu):
+class MainMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -124,7 +134,7 @@ class MainMenu(KaboomMenu):
         pyglet.app.exit()
 
 
-class PlayMenu(KaboomMenu):
+class PlayMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -143,7 +153,7 @@ class PlayMenu(KaboomMenu):
         self.parent.step_in("network")
 
 
-class LocalMenu(KaboomMenu):
+class LocalMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -160,14 +170,14 @@ class LocalMenu(KaboomMenu):
         self.create_menu(items)
 
     def on_players(self, idx):
-        self.nb_players = idx + 2
+        players.set_nb_players(idx + 2)
         return True
 
     def on_start(self):
         return True
 
 
-class NetworkMenu(KaboomMenu):
+class NetworkMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -183,10 +193,10 @@ class NetworkMenu(KaboomMenu):
         self.parent.step_in("join")
 
     def on_host(self):
-        pass
+        self.parent.step_in("host")
 
 
-class JoinMenu(KaboomMenu):
+class JoinMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -194,7 +204,7 @@ class JoinMenu(KaboomMenu):
         self.ip_item = EntryMenuItem(
             "Host IP: ", 
             self.on_ip,
-            server.get_ip()
+            client.description.get_server_ip()
         )
 
         items = [
@@ -225,10 +235,40 @@ class JoinMenu(KaboomMenu):
         except:
             return
 
-        server.set_ip(self.ip_item.value) 
-        director.push(Scene(client.GameLayer()))
+        client.description.set_nb_players(1)
+        client.description.set_server_ip(self.ip_item.value) 
+        options.save()
+        log.client("menu.JoinMenu.on_start:: scene_stack: {}".format(director.scene_stack))
+        director.push(client.GameScene())
 
-class OptionsMenu(KaboomMenu):
+
+class HostMenu(GameMenu):
+
+    def __init__(self):
+        super().__init__()
+
+        self.maps = game.WorldMap.list_files()
+
+        items = [
+            MultipleMenuItem("Players: ", self.on_players, ["2", "3", "4"]),
+            MultipleMenuItem("Map: ", self.on_map, self.maps),
+            MenuItem("Start", self.on_start)
+        ]
+
+        self.create_menu(items)
+
+    def on_players(self, idx):
+        server.description.set_max_players(idx + 2)
+
+    def on_map(self, idx):
+        server.description.set_mapname(self.maps[idx])
+
+    def on_start(self):
+        client.start_server()
+        client.description.set_nb_players(1)
+        director.push(client.GameScene())
+
+class OptionsMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -246,11 +286,7 @@ class OptionsMenu(KaboomMenu):
                 audio.sound.get_volumes(),
                 audio.sound.get_volume()
             ),
-            MenuItem("Players", self.on_players),
-            *[MenuItem("Keybindings {}".format(players.names[idx]),
-                self.on_keybindings, (idx))
-                for idx in range(4)
-            ]
+            MenuItem("Players", self.on_players)
         ]
 
         self.create_menu(items)
@@ -264,13 +300,10 @@ class OptionsMenu(KaboomMenu):
     def on_players(self):
         self.parent.step_in("players")
 
-    def on_keybindings(self, idx):
-        self.parent.step_in("keybindings@{}".format(idx))
-
     def on_exit(self):
         options.save()
 
-class PlayersMenu(KaboomMenu):
+class PlayersMenu(GameMenu):
 
     def __init__(self):
         super().__init__()
@@ -284,12 +317,17 @@ class PlayersMenu(KaboomMenu):
         self.create_menu(items)
 
     def on_player(self, idx):
-        pass
+        self.parent.add_layer(PlayerMenu(idx), "player")
+        self.parent.step_in("player")
+        self.parent.remove_layer("player")
 
-class KeybindingsMenu(KaboomMenu):
+
+class PlayerMenu(GameMenu):
 
     def __init__(self, idx):
         super().__init__()
+
+        self.idx = idx
 
         self.keyb = None
         self.keyb_items = {
@@ -298,15 +336,27 @@ class KeybindingsMenu(KaboomMenu):
                 self.on_keybinding,
                 k
             )
-            for k, v in players.keybindings[idx].items()
+            for k, v in players.get_keybindings(idx).items()
         }
-        self.idx = idx
 
-        self.create_menu(self.keyb_items.values())
+        self.name_item = EntryMenuItem(
+            "Name: ",
+            self.on_name,
+            players.get_name(self.idx)
+        )
+        
+        items = [self.name_item] + list(self.keyb_items.values())
+
+        self.create_menu(items)
 
     def update_layout(self):
         self._build_items(verticalMenuLayout)
         self._select_item(list(self.keyb_items).index(self.keyb))
+
+    def on_name(self, value):
+        self.name_item.value = ''.join(filter(
+            lambda c: c in string.ascii_letters + string.digits, value))
+        players.set_name(self.name_item.value, self.idx)
         
     def on_keybinding(self, keyb):
         log.debug("menu.Keybinding.on_keybinding:: idx, keyb: {}, {}"

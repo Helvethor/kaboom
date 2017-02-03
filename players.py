@@ -1,8 +1,6 @@
 from pyglet.window import key
 
-max_players = 4
-nb_players = 1
-names = ["P1", "P2", "P3", "P4"]
+names = ["Player1", "Player2", "Player3", "Player4"]
 keybindings = [
     {
         'UP':       key.W,
@@ -48,23 +46,16 @@ def get_keybinding(idx, key):
 def set_keybinding(value, idx, key):
     keybindings[int(idx)][key] = int(value)
 
+def get_keybindings(idx):
+    return keybindings[int(idx)]
+
 def get_idxs():
-    return range(max_players)
+    return range(4)
 
 def get_name(idx):
-    return names[idx]
+    return names[int(idx)]
 
+def set_name(name, idx):
+    names[int(idx)] = str(name)
 
-class Player:
-
-    def __init__(self, ):
-        self.idx = self.count
-        self.count += 1
-        self.Keybindings = keybindings[self.idx]
-
-    def get_idx(self):
-        return idx
-
-    def get_keybindings(self):
-        return self.Keybindings
 
