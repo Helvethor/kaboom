@@ -40,13 +40,13 @@ class GameClient:
         socket, addr = self.server
 
         try:
-            request = message.to_string()
-            log.client("game.Message.send_recv:: sendto: {}".format(request))
-            socket.sendto(request.encode(), addr)
+            request = pickle.dumps(message)
+            #log.client("game.Message.send_recv:: sendto: {}".format(request))
+            socket.sendto(request, addr)
 
             socket.settimeout(2)
-            response = socket.recv(1024).decode()
-            log.client("game.Message.send_recv:: recv: {}".format(response))
+            response = pickle.loads(socket.recv(1024))
+            #log.client("game.Message.send_recv:: recv: {}".format(response))
 
         except:
             response = self.send_recv(message, retry - 1)
@@ -58,8 +58,8 @@ class GameClient:
         pls = [Player(idc = idc, name = players.get_name(idc))
             for idc in range(description.get_nb_players())]
 
-        response = self.send_recv(PlayersMessage(pls))
-        pls = PlayersMessage.from_string(response).get_players()
+        message = self.send_recv(Message("players", pls))
+        pls = message.get_data()
 
         if len(pls) != description.get_nb_players():
             log.client("client.GameScene.request_players:: end")
@@ -68,9 +68,8 @@ class GameClient:
         return pls
 
     def request_world_map(self):
-
-        request = WorldMapMessage()
-        response = self.send_recv(request)
+        message = self.send_recv(Message("world_map", None))
+        return message.get_data()
 
 
 class GameScene(Scene):
@@ -89,9 +88,16 @@ class GameScene(Scene):
         game_client.server = self.server
         
     def on_enter(self):
+
         director.window.push_handlers(self)
+
         self.players = game_client.request_players()
+        log.client("client.GameScene.on_enter:: players: {}"
+            .format(self.players))
+
         self.wm = game_client.request_world_map()
+        log.client("client.GameScene.on_enter:: world_map: {}"
+            .format(self.wm))
 
     def on_exit(self):
         director.window.remove_handlers(self)
@@ -102,7 +108,7 @@ class GameScene(Scene):
             .format(symbol, modifiers))
 
         t0 = time.time()
-        response = game_client.send_recv(KeyPressMessage(symbol, modifiers))
+        response = game_client.send_recv(Message("key_press", (symbol, modifiers)))
         t1 = time.time()
         log.client("client.GameScene.on_key_press:: time: {}".format(t1 - t0))
         

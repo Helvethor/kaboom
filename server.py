@@ -1,7 +1,7 @@
 #!/usr/bin/python3 
 
 
-import socket, socketserver, threading, sys, traceback
+import socket, socketserver, threading, sys, traceback, pickle
 
 import log
 from game import *
@@ -65,28 +65,28 @@ class GameServer(socketserver.ThreadingUDPServer):
             self.shutdown()
             self.running = False
 
-    def process_message(self, message):
+    def reply_message(self, message):
 
-        cls = message.get_cls()
+        verb = message.get_verb()
 
         try:
-            handler = eval("self.handle_{}Message".format(cls))
+            handler = eval("self.reply_{}".format(verb))
 
         except Exception as e:
-            log.server("server.GameServer.process_message:: exception: {}"
+            log.server("server.GameServer.reply_message:: exception: {}"
                 .format(e))
-            return ErrorMessage("Unhandled message class")
+            return Message("error", "Unhandled message class")
 
         try:
             return handler(message)
 
         except Exception as e:
-            log.server("server.GameServer.process_message:: exception: {}"
+            log.server("server.GameServer.reply_message:: exception: {}"
                 .format(traceback.format_exc()))
-            return ErrorMessage("Message handling error")
+            return Message("error", "Message handling error")
 
-    def handle_PlayersMessage(self, message):
-        players = message.get_players()
+    def reply_players(self, message):
+        players = message.get_data()
 
         self.players.acquire()
         registered = self.players.length()
@@ -98,7 +98,7 @@ class GameServer(socketserver.ThreadingUDPServer):
                 players[idc].set_ids(ids) 
                 players[idc].set_pos(self.wm.get_starts()[ids])
 
-            log.server("server.GameServer.handle_PlayersMessage:: players: {}"
+            log.server("server.GameServer.reply_players:: players: {}"
                 .format(players))
 
             [self.players.push(p) for p in players]
@@ -108,12 +108,12 @@ class GameServer(socketserver.ThreadingUDPServer):
 
         self.players.release()
 
-        return PlayersMessage(players)
+        return Message("players", players)
 
-    def handle_WorldMapMessage(self, message):
-        log.server("server.GameServer.handle_WorldMapMessage:: map: {}"
+    def reply_world_map(self, message):
+        log.server("server.GameServer.reply_world_map:: map: {}"
             .format(self.wm))
-        return WorldMapMessage(self.wm)
+        return Message("world_map", self.wm)
 
     def get_player(self, ids):
         return self.players[ids]
@@ -131,26 +131,17 @@ class GameRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
 
         try:
-            request = self.request[0].decode().strip()
+            message = pickle.loads(self.request[0])
             socket = self.request[1]
-            log.server("server.GameRequestHandler:: recv: {}'"
-                .format(request))
+            #log.server("server.GameRequestHandler:: recv: {}'"
+            #    .format(message))
 
-            message = Message.from_string(request)
-            log.server("server.GameRequestHandler.handler:: message: {}'"
-                .format(message))
+            self.server.messages.push(message)
+            response = pickle.dumps(self.server.reply_message(message))
 
-
-            if message:
-                self.server.messages.push(message)
-                response = self.server.process_message(message).to_string()
-
-            else:
-                response = ErrorMessage("Could not read message").to_string()
-
-            socket.sendto(response.encode(), self.client_address)
-            log.server("server.GameRequestHandler:: send: {}"
-                .format(response))
+            socket.sendto(response, self.client_address)
+            #log.server("server.GameRequestHandler:: send: {}"
+            #    .format(response))
 
         except Exception as e:
             log.server("server.GameRequestHandler.handler:: exception: {}"
